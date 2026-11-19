@@ -1,0 +1,235 @@
+:root {
+    --color-primary: #16645c;
+    --color-primary-hover: #104f49;
+    --color-page: #f2f6f6;
+    --color-surface: #ffffff;
+    --color-text: #203436;
+    --color-muted: #526869;
+    --color-border: #cbd9d8;
+    --color-focus: #127a9a;
+    --radius: 12px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--color-page);
+    color: var(--color-text);
+    font: 16px/1.65 "Leelawadee UI", Tahoma, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+/* โครงหน้า: ใช้ page--narrow เพิ่มสำหรับหน้าฟอร์ม */
+.page {
+    width: calc(100% - 32px);
+    max-width: 1120px;
+    margin: clamp(24px, 6vw, 64px) auto;
+}
+
+.page--narrow {
+    max-width: 720px;
+}
+
+/* การ์ดและหัวข้อ */
+.card {
+    padding: clamp(20px, 4vw, 36px);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 24px rgb(22 64 60 / 6%);
+}
+
+.page-title {
+    margin: 0 0 24px;
+    font-size: clamp(1.4rem, 3vw, 1.85rem);
+    line-height: 1.4;
+}
+
+/* ฟอร์ม */
+.field {
+    display: grid;
+    gap: 8px;
+}
+
+.field__label {
+    font-weight: 600;
+}
+
+.field__control {
+    display: block;
+    width: 100%;
+    padding: 10px 12px;
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+}
+
+.field__control::file-selector-button {
+    margin-right: 12px;
+    padding: 6px 12px;
+    font: inherit;
+    color: var(--color-primary);
+    background: #edf6f3;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.field__hint {
+    margin: 0;
+    color: var(--color-muted);
+    font-size: 0.875rem;
+}
+
+/* ปุ่ม */
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 24px;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 8px 20px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.btn--primary {
+    color: white;
+    background: var(--color-primary);
+}
+
+.btn--primary:hover {
+    background: var(--color-primary-hover);
+}
+
+.btn:focus-visible,
+.field__control:focus-visible {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 3px;
+}
+
+/* กล่องแจ้งผล */
+.notice {
+    margin-bottom: 20px;
+    padding: 14px 18px;
+    border-left: 4px solid;
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+}
+
+.notice--error {
+    color: #852e29;
+    background: #fff1ef;
+    border-color: #be5048;
+}
+
+.notice--info {
+    color: #244b60;
+    background: #edf5fa;
+    border-color: #48809b;
+}
+
+.notice__title {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.notice__list {
+    margin: 6px 0 0;
+    padding-inline-start: 22px;
+}
+
+@media (max-width: 480px) {
+    .actions > .btn {
+        width: 100%;
+    }
+}
+
+.list-header,
+.page-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+.list-header {
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.list-header .page-title {
+    margin: 0;
+}
+
+.table-scroll {
+    overflow-x: auto;
+    margin-bottom: 12px;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+}
+
+.data-table th {
+    background: #edf6f3;
+    white-space: nowrap;
+}
+
+.data-table .number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.page-links {
+    margin-top: 18px;
+    gap: 6px;
+}
+
+.page-links a,
+.page-links [aria-current="page"] {
+    min-width: 40px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    text-align: center;
+    text-decoration: none;
+    color: var(--color-primary);
+}
+
+.page-links a:hover {
+    background: #edf6f3;
+}
+
+.page-links [aria-current="page"] {
+    color: white;
+    background: var(--color-primary);
+}
