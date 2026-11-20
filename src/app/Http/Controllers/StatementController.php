@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Validator;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use Illuminate\Validation\Rule;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use RuntimeException;
 use Throwable;
 
@@ -327,7 +330,7 @@ class StatementController extends Controller
     public function summary(int $fileId)
     {
         $file = DB::table('statement_files')
-            ->select('id', 'original_filename', 'allocation_amount')
+            ->select('id', 'original_filename', 'payment_year', 'payment_period', 'allocation_amount')
             ->where('id', $fileId)
             ->first();
 
@@ -427,7 +430,80 @@ class StatementController extends Controller
 
         $rows = DB::select($sql, [$fileId, $budget]);
 
+        if (request()->query('format') === 'xlsx') {
+            return $this->downloadSummary($file, $rows);
+        }
+
         return view('statement.summary', compact('file', 'rows', 'budget'));
+    }
+
+    private function downloadSummary(object $file, array $rows)
+    {
+        $filename = "statement-summary-{$file->id}.xlsx";
+
+        return response()->streamDownload(function () use ($file, $rows) {
+            $book = new Spreadsheet();
+            try {
+                $sheet = $book->getActiveSheet();
+                $sheet->setTitle('ผลจัดสรร');
+                $sheet->setCellValue('A1', 'ผลประมวลผลสเตทเม้นประกันสังคม');
+                $sheet->mergeCells('A1:F1');
+                $sheet->setCellValue('A2', 'ไฟล์ต้นทาง');
+                $sheet->setCellValueExplicit('B2', $file->original_filename, DataType::TYPE_STRING);
+                $sheet->fromArray(['ปี', $file->payment_year, 'งวดที่', $file->payment_period], null, 'A3');
+                $sheet->setCellValue('A4', 'ยอดจัดสรรทั้งไฟล์ (บาท)');
+
+                // Excel รักษาความแม่นยำได้ 15 หลัก เก็บค่าที่ยาวกว่านั้นเป็นข้อความ
+                $writeDecimal = static function ($cell, $value) use ($sheet) {
+                    if ($value === null) {
+                        return;
+                    }
+                    $text = (string) $value;
+                    $digits = ltrim(str_replace(['.', '-'], '', $text), '0');
+                    $type = strlen($digits) > 15 ? DataType::TYPE_STRING : DataType::TYPE_NUMERIC;
+                    $sheet->setCellValueExplicit($cell, $text, $type);
+                };
+                $writeDecimal('B4', $file->allocation_amount);
+                $sheet->fromArray(['รหัส รพ.', 'โรงพยาบาล', 'จำนวนรายการ', 'คะแนนรวม',
+                    'สัดส่วน', 'ยอดจัดสรร (บาท)'], null, 'A6');
+                $line = 7;
+                $records = 0;
+                foreach ($rows as $row) {
+                    $sheet->setCellValueExplicit("A{$line}", (string) $row->hproc, DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit("B{$line}", (string) $row->hospital_name, DataType::TYPE_STRING);
+                    $sheet->setCellValue("C{$line}", (int) $row->total_records);
+                    $writeDecimal("D{$line}", $row->total_score);
+                    $writeDecimal("E{$line}", $row->calculated_value);
+                    $writeDecimal("F{$line}", $row->final_amount);
+                    $records += (int) $row->total_records;
+                    $line++;
+                }
+                $sheet->setCellValue("A{$line}", 'รวมทั้งไฟล์');
+                $sheet->setCellValue("C{$line}", $records);
+                if ($rows) {
+                    $writeDecimal("D{$line}", $rows[0]->grand_score);
+                    if ($rows[0]->final_amount !== null) {
+                        $writeDecimal("F{$line}", $file->allocation_amount);
+                    } else {
+                        $sheet->setCellValue('A5', 'คำนวณยอดจัดสรรไม่ได้ กรุณาตรวจสอบคะแนน');
+                    }
+                }
+                foreach (['B4', "D7:D{$line}", "F7:F{$line}"] as $range) {
+                    $sheet->getStyle($range)->getNumberFormat()->setFormatCode('#,##0.00');
+                }
+                $sheet->getStyle('A6:F6')->getFont()->setBold(true);
+                $sheet->getStyle("A{$line}:F{$line}")->getFont()->setBold(true);
+                foreach (['A' => 26, 'B' => 65, 'C' => 18, 'D' => 18, 'E' => 24, 'F' => 24] as $col => $width) {
+                    $sheet->getColumnDimension($col)->setWidth($width);
+                }
+                $sheet->freezePane('A7');
+                (new Xlsx($book))->save('php://output');
+            } finally {
+                $book->disconnectWorksheets();
+            }
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     public function files()

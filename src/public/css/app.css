@@ -233,3 +233,26 @@ textarea {
     color: white;
     background: var(--color-primary);
 }
+
+/* คลาสข้อความ ใช้ร่วมกันได้ในทุกหน้า */
+.text-primary { color: var(--color-primary); }
+.text-muted   { color: var(--color-muted); }
+.text-success { color: #17653b; }
+.text-danger  { color: #852e29; }
+.text-warning { color: #805408; }
+.text-info    { color: #244b60; }
+
+.text-sm { font-size: 0.875rem; }
+.text-base { font-size: 1rem; }
+.text-lg { font-size: 1.125rem; }
+.text-xl { font-size: 1.5rem; }
+
+.font-normal { font-weight: 400; }
+.font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
+.text-italic { font-style: italic; }
+.text-underline { text-decoration: underline; }
+
+.text-left, .data-table .text-left { text-align: left; }
+.text-center, .data-table .text-center { text-align: center; }
+.text-right, .data-table .text-right { text-align: right; }
