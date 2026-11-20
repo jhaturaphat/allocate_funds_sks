@@ -51,3 +51,25 @@ Seeder จะเพิ่มหรืออัปเดตคะแนนโร�
 ```bash
 docker compose exec --user root php sh -c "mkdir -p storage/framework/views storage/framework/cache/data storage/framework/sessions storage/logs bootstrap/cache && chown -R www-data:www-data storage bootstrap/cache && chmod -R u+rwX storage bootstrap/cache"
 ```
+
+## ตรวจการเชื่อมต่อ MySQL
+
+```bash
+docker compose exec php php artisan db:show --database=mysql
+```
+
+หากเห็นชื่อฐาน `sks` และจำนวนตาราง แสดงว่า Laravel เชื่อมต่อ MySQL ได้แล้ว
+
+### หาก db:show แจ้งว่า “The "intl" PHP extension is required”
+
+PHP ใช้ส่วนขยาย `intl` เพื่อจัดรูปแบบตัวเลขในรายงาน สำหรับ Dockerfile ที่ใช้ `FROM php:8.3-fpm` ให้เพิ่ม `libicu-dev` ในรายการ `apt-get install` และเพิ่ม `intl` ในรายการ `docker-php-ext-install` ผู้ติดตั้งใหม่จะได้ส่วนขยายนี้จากขั้นตอน build ปกติเมื่อใช้ Dockerfile ที่ปรับแล้ว
+
+สำหรับเครื่องที่ใช้ image เดิม หลังอัปเดต Dockerfile ให้สร้าง service PHP ใหม่และตรวจผล
+
+```bash
+docker compose up -d --build --no-deps php
+docker compose exec php php --ri intl
+docker compose exec php php artisan db:show --database=mysql
+```
+
+คำสั่งตรวจส่วนขยายควรแสดง `Internationalization support => enabled`
