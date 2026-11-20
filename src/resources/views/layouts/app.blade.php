@@ -12,5 +12,6 @@
     <main class="page @yield('page-class')">
         @yield('content')
     </main>
+    @include('partials.button-icons')
 </body>
 </html>

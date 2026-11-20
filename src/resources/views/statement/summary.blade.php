@@ -6,7 +6,14 @@
 <section class="card">
     <div class="list-header">
         <h1 class="page-title">ผลประมวลผลสเตทเม้นประกันสังคม</h1>
-        <a class="btn btn--primary" href="{{ route('statement.index') }}">กลับหน้านำเข้า</a>
+        <a href="{{ route('statement.index') }}" class="btn btn--primary">
+            <span aria-hidden="true">📥</span>
+            กลับหน้านำเข้า
+        </a>
+        <a href="{{ route('dashboard') }}" class="btn btn--primary">
+            <span aria-hidden="true">📊</span>
+            กลับหน้า Dashboard
+        </a>
         <a class="btn btn--primary"
             href="{{ route('statement.summary', ['fileId' => $file->id, 'format' => 'xlsx']) }}">
             ส่งออก Excel
