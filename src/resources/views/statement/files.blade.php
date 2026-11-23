@@ -12,6 +12,14 @@
             </a>
         </div>
 
+        @if (session('success'))
+            <p class="notice notice--info" role="status">{{ session('success') }}</p>
+        @endif
+
+        @if (session('error'))
+            <p class="notice notice--error" role="alert">{{ session('error') }}</p>
+        @endif
+
         @if ($files->isEmpty())
             <p class="notice notice--info">ไม่พบไฟล์สเตทเม้นในหน้านี้</p>
         @else
@@ -27,6 +35,7 @@
                             <th scope="col" class="number">จำนวนรายการ</th>
                             <th scope="col" class="number">ยอดจัดสรร (บาท)</th>
                             <th scope="col">ประมวลผล</th>
+                            <th scope="col">จัดการ</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -54,6 +63,18 @@
                                     @else
                                         <span class="field__hint">รอระบุยอดเงิน</span>
                                     @endif
+                                </td>
+                                <td>
+                                    <form method="POST"
+                                          action="{{ route('statement.files.destroy', ['fileId' => $file->id]) }}"
+                                          onsubmit="return confirm('ยืนยันลบไฟล์นี้ใช่หรือไม่? ข้อมูลรายละเอียดที่นำเข้าและผลการประมวลผลของไฟล์นี้จะถูกลบถาวร และสามารถนำไฟล์เดิมกลับมาอัปโหลดใหม่ได้');">
+                                        @csrf
+                                        @method('DELETE')
+                                        <button type="submit" class="btn btn--danger"
+                                                aria-label="ลบไฟล์ {{ $file->original_filename }}">
+                                            ลบ
+                                        </button>
+                                    </form>
                                 </td>
                             </tr>
                         @endforeach

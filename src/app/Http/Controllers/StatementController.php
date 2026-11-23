@@ -6,6 +6,7 @@ use DateTimeImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Validator;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
@@ -13,6 +14,9 @@ use Illuminate\Validation\Rule;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpWord\TemplateProcessor;
+use Symfony\Component\Process\Process;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -347,7 +351,185 @@ class StatementController extends Controller
 
         // เก็บยอดเป็นข้อความจนถึง MySQL เพื่อรักษาค่าบาทและสตางค์
         $budget = (string) $file->allocation_amount;
+        $rows = $this->getAllocationRows($fileId, $budget);
 
+        if (request()->query('format') === 'xlsx') {
+            return $this->downloadSummary($file, $rows);
+        }
+
+        return view('statement.summary', compact('file', 'rows', 'budget'));
+    }
+
+    /**
+     * สร้าง PDF หนังสือแจ้งจัดสรรให้โรงพยาบาลหนึ่งแห่ง
+     */
+    public function printHospital(int $fileId, string $hproc)
+    {
+        $file = $this->getCompletedStatementFile($fileId);
+        $rows = $this->getAllocationRows($fileId, (string) $file->allocation_amount);
+
+        $row = collect($rows)->first(
+            fn ($item) => (string) $item->hproc === $hproc
+        );
+
+        abort_if($row === null, 404, 'ไม่พบข้อมูลโรงพยาบาลในไฟล์นี้');
+        $this->assertPrintableRow($row);
+
+        $pdfPath = $this->createHospitalPdf($row);
+
+        return response()
+            ->download($pdfPath, "allocation-{$fileId}-{$hproc}.pdf", [
+                'Content-Type' => 'application/pdf',
+            ])
+            ->deleteFileAfterSend(true);
+    }
+
+    /**
+     * สร้าง PDF รวมทุกโรงพยาบาล โดยเรียงตาม hproc ตามผล SQL เดิม
+     */
+    public function printAllHospitals(int $fileId)
+    {
+        $file = $this->getCompletedStatementFile($fileId);
+        $rows = $this->getAllocationRows($fileId, (string) $file->allocation_amount);
+
+        abort_if($rows === [], 404, 'ไม่พบรายการจัดสรรสำหรับพิมพ์');
+
+        foreach ($rows as $row) {
+            $this->assertPrintableRow($row);
+        }
+
+        $pdfPath = $this->createCombinedHospitalPdf($rows);
+
+        return response()
+            ->download($pdfPath, "allocation-all-{$fileId}.pdf", [
+                'Content-Type' => 'application/pdf',
+            ])
+            ->deleteFileAfterSend(true);
+    }
+
+    /**
+     * สร้างหนังสือ 1 ฉบับ พร้อมบัญชีรายละเอียดแนบท้ายทุกโรงพยาบาล
+     * เป็นรูปแบบเอกสารเพิ่มเติมจากการพิมพ์หนังสือรายโรงพยาบาลแบบเดิม
+     */
+    public function printPeriodWithAppendix(int $fileId)
+    {
+        $file = $this->getCompletedStatementFile($fileId);
+        $rows = $this->getAllocationRows($fileId, (string) $file->allocation_amount);
+
+        abort_if($rows === [], 404, 'ไม่พบรายการจัดสรรสำหรับพิมพ์');
+
+        foreach ($rows as $row) {
+            $this->assertPrintableRow($row);
+        }
+
+        $pdfPath = $this->createPeriodPdf($file, $rows);
+
+        return response()
+            ->download($pdfPath, "allocation-period-{$fileId}.pdf", [
+                'Content-Type' => 'application/pdf',
+            ])
+            ->deleteFileAfterSend(true);
+    }
+
+
+    /** ดาวน์โหลด Word หนังสือรายโรงพยาบาลหนึ่งแห่ง */
+    public function downloadHospitalWord(int $fileId, string $hproc)
+    {
+        $file = $this->getCompletedStatementFile($fileId);
+        $rows = $this->getAllocationRows($fileId, (string) $file->allocation_amount);
+
+        $row = collect($rows)->first(
+            fn ($item) => (string) $item->hproc === $hproc
+        );
+
+        abort_if($row === null, 404, 'ไม่พบข้อมูลโรงพยาบาลในไฟล์นี้');
+        $this->assertPrintableRow($row);
+
+        $wordPath = $this->createHospitalWord($row);
+
+        return response()
+            ->download($wordPath, "allocation-{$fileId}-{$hproc}.docx", [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            ])
+            ->deleteFileAfterSend(true);
+    }
+
+    /** ดาวน์โหลด Word ของทุกโรงพยาบาลเป็น ZIP (หนึ่งโรงพยาบาลต่อหนึ่งไฟล์ DOCX) */
+    public function downloadAllHospitalWords(int $fileId)
+    {
+        $file = $this->getCompletedStatementFile($fileId);
+        $rows = $this->getAllocationRows($fileId, (string) $file->allocation_amount);
+
+        abort_if($rows === [], 404, 'ไม่พบรายการจัดสรรสำหรับดาวน์โหลด');
+
+        foreach ($rows as $row) {
+            $this->assertPrintableRow($row);
+        }
+
+        $zipPath = $this->createAllHospitalWordZip($fileId, $rows);
+
+        return response()
+            ->download($zipPath, "allocation-all-{$fileId}-word.zip", [
+                'Content-Type' => 'application/zip',
+            ])
+            ->deleteFileAfterSend(true);
+    }
+
+    /** ดาวน์โหลด Word หนังสือหนึ่งฉบับพร้อมบัญชีรายละเอียดแนบท้าย */
+    public function downloadPeriodWord(int $fileId)
+    {
+        $file = $this->getCompletedStatementFile($fileId);
+        $rows = $this->getAllocationRows($fileId, (string) $file->allocation_amount);
+
+        abort_if($rows === [], 404, 'ไม่พบรายการจัดสรรสำหรับดาวน์โหลด');
+
+        foreach ($rows as $row) {
+            $this->assertPrintableRow($row);
+        }
+
+        $wordPath = $this->createPeriodWord($file, $rows);
+
+        return response()
+            ->download($wordPath, "allocation-period-{$fileId}.docx", [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            ])
+            ->deleteFileAfterSend(true);
+    }
+
+    /** ดึงไฟล์นำเข้าที่สำเร็จและมีการกำหนดยอดจัดสรรแล้ว */
+    private function getCompletedStatementFile(int $fileId): object
+    {
+        $file = DB::table('statement_files')
+            ->select('id', 'original_filename', 'payment_year', 'payment_period', 'allocation_amount')
+            ->where('id', $fileId)
+            ->where('status', 'completed')
+            ->first();
+
+        abort_if($file === null, 404, 'ไม่พบไฟล์ที่นำเข้าสำเร็จ');
+        abort_if($file->allocation_amount === null, 422, 'ไฟล์นี้ยังไม่ได้ระบุยอดเงินจัดสรร');
+
+        return $file;
+    }
+
+    /** ตรวจสอบว่ารายการนี้สามารถสร้างหนังสือได้ */
+    private function assertPrintableRow(object $row): void
+    {
+        abort_if(
+            (int) $row->missing_scores > 0 || $row->final_amount === null,
+            422,
+            'ยังไม่สามารถพิมพ์ได้ เนื่องจากคะแนนกลุ่มโรคไม่ครบหรือคะแนนรวมเท่ากับศูนย์'
+        );
+
+        abort_if(
+            trim((string) $row->hproc) === '' || trim((string) $row->hospital_name) === '',
+            422,
+            "ไม่พบชื่อโรงพยาบาลในตาราง hospcode (รหัส {$row->hproc})"
+        );
+    }
+
+    /** SQL คำนวณยอดจัดสรรชุดเดียวกับหน้าสรุปและไฟล์ Excel */
+    private function getAllocationRows(int $fileId, string $budget): array
+    {
         $sql = <<<'SQL'
             WITH group_data AS (
                 SELECT
@@ -374,14 +556,10 @@ class StatementController extends Controller
             amounts AS (
                 SELECT
                     t.*,
-
-                    -- สัดส่วนคะแนนของโรงพยาบาลต่อคะแนนทั้งไฟล์
                     CASE WHEN missing_total = 0 THEN
                         CAST(total_score AS DECIMAL(30,12))
                         / NULLIF(grand_score, 0)
                     END AS calculated_value,
-
-                    -- คำนวณเงินจากคะแนนโดยตรง แล้วปัดยอดเงินเป็นสตางค์
                     CASE WHEN missing_total = 0 THEN
                         ROUND(
                             CAST(total_score * budget AS DECIMAL(38,12))
@@ -397,8 +575,6 @@ class StatementController extends Controller
                     CASE
                         WHEN missing_total > 0 OR COALESCE(grand_score, 0) = 0
                             THEN NULL
-
-                        -- โรงพยาบาลสุดท้ายรับยอดคงเหลือให้รวมตรงกับยอดของไฟล์
                         WHEN rn = total_rows THEN
                             budget - COALESCE(
                                 SUM(raw_amount) OVER (
@@ -407,7 +583,6 @@ class StatementController extends Controller
                                 ),
                                 0.00
                             )
-
                         ELSE raw_amount
                     END AS final_amount
                 FROM amounts AS a
@@ -428,13 +603,456 @@ class StatementController extends Controller
             ORDER BY a.hproc
             SQL;
 
-        $rows = DB::select($sql, [$fileId, $budget]);
+        return DB::select($sql, [$fileId, $budget]);
+    }
 
-        if (request()->query('format') === 'xlsx') {
-            return $this->downloadSummary($file, $rows);
+    /** สร้างไฟล์ Word สำหรับโรงพยาบาลหนึ่งแห่ง */
+    private function createHospitalWord(object $row): string
+    {
+        $baseDir = storage_path('app/documents');
+        $workDir = $baseDir . '/temp/' . Str::uuid();
+        $generatedDir = $baseDir . '/generated';
+
+        File::ensureDirectoryExists($workDir);
+        File::ensureDirectoryExists($generatedDir);
+
+        try {
+            $tempDocx = $workDir . '/allocation.docx';
+            $this->fillAllocationTemplate($row, $tempDocx);
+
+            $targetDocx = $generatedDir . '/allocation-' . Str::uuid() . '.docx';
+            File::move($tempDocx, $targetDocx);
+
+            return $targetDocx;
+        } finally {
+            File::deleteDirectory($workDir);
+        }
+    }
+
+    /** สร้าง ZIP ที่บรรจุ Word แยกไฟล์ตามโรงพยาบาลทุกแห่ง */
+    private function createAllHospitalWordZip(int $fileId, array $rows): string
+    {
+        if (!class_exists(\ZipArchive::class)) {
+            throw new RuntimeException(
+                'PHP Container ยังไม่มี ZipArchive กรุณาตรวจสอบ PHP extension zip'
+            );
         }
 
-        return view('statement.summary', compact('file', 'rows', 'budget'));
+        $baseDir = storage_path('app/documents');
+        $workDir = $baseDir . '/temp/' . Str::uuid();
+        $generatedDir = $baseDir . '/generated';
+        $zipPath = $generatedDir . '/allocation-all-' . $fileId . '-' . Str::uuid() . '.zip';
+
+        File::ensureDirectoryExists($workDir);
+        File::ensureDirectoryExists($generatedDir);
+
+        $zip = new \ZipArchive();
+        $opened = false;
+
+        try {
+            $result = $zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+            if ($result !== true) {
+                throw new RuntimeException('ไม่สามารถสร้างไฟล์ ZIP สำหรับ Word ได้');
+            }
+            $opened = true;
+
+            foreach ($rows as $index => $row) {
+                $number = str_pad((string) ($index + 1), 3, '0', STR_PAD_LEFT);
+                $hproc = preg_replace('/[^A-Za-z0-9_-]/', '_', (string) $row->hproc);
+                $docxPath = $workDir . '/hospital-' . $number . '.docx';
+                $this->fillAllocationTemplate($row, $docxPath);
+
+                $entryName = $number . '_allocation_' . $hproc . '.docx';
+                if (!$zip->addFile($docxPath, $entryName)) {
+                    throw new RuntimeException(
+                        'ไม่สามารถเพิ่ม Word ของโรงพยาบาลรหัส ' . $row->hproc . ' ลง ZIP ได้'
+                    );
+                }
+            }
+
+            if (!$zip->close()) {
+                $opened = false;
+                throw new RuntimeException('ไม่สามารถปิดและบันทึกไฟล์ ZIP ได้');
+            }
+            $opened = false;
+
+            if (!is_file($zipPath) || filesize($zipPath) === 0) {
+                throw new RuntimeException('ไฟล์ ZIP ที่สร้างขึ้นว่างเปล่าหรือไม่สมบูรณ์');
+            }
+
+            return $zipPath;
+        } catch (\Throwable $exception) {
+            if ($opened) {
+                $zip->close();
+            }
+            File::delete($zipPath);
+            throw $exception;
+        } finally {
+            File::deleteDirectory($workDir);
+        }
+    }
+
+    /** สร้าง Word หนังสือหนึ่งฉบับพร้อมตารางแนบท้าย */
+    private function createPeriodWord(object $file, array $rows): string
+    {
+        $baseDir = storage_path('app/documents');
+        $workDir = $baseDir . '/temp/' . Str::uuid();
+        $generatedDir = $baseDir . '/generated';
+
+        File::ensureDirectoryExists($workDir);
+        File::ensureDirectoryExists($generatedDir);
+
+        try {
+            $tempDocx = $workDir . '/allocation-period.docx';
+            $this->fillPeriodTemplate($file, $rows, $tempDocx);
+
+            $targetDocx = $generatedDir . '/allocation-period-' . Str::uuid() . '.docx';
+            File::move($tempDocx, $targetDocx);
+
+            return $targetDocx;
+        } finally {
+            File::deleteDirectory($workDir);
+        }
+    }
+
+    /** สร้าง PDF สำหรับโรงพยาบาลหนึ่งแห่ง */
+    private function createHospitalPdf(object $row): string
+    {
+        $baseDir = storage_path('app/documents');
+        $workDir = $baseDir . '/temp/' . Str::uuid();
+        $generatedDir = $baseDir . '/generated';
+
+        File::ensureDirectoryExists($workDir);
+        File::ensureDirectoryExists($generatedDir);
+
+        try {
+            $docxPath = $workDir . '/allocation.docx';
+            $this->fillAllocationTemplate($row, $docxPath);
+            $this->convertDocxFilesToPdf([$docxPath], $workDir);
+
+            $sourcePdf = $workDir . '/allocation.pdf';
+            $targetPdf = $generatedDir . '/allocation-' . Str::uuid() . '.pdf';
+            File::move($sourcePdf, $targetPdf);
+
+            return $targetPdf;
+        } finally {
+            File::deleteDirectory($workDir);
+        }
+    }
+
+    /** สร้าง PDF ของทุกโรงพยาบาลและรวมเป็นไฟล์เดียว */
+    private function createCombinedHospitalPdf(array $rows): string
+    {
+        $baseDir = storage_path('app/documents');
+        $workDir = $baseDir . '/temp/' . Str::uuid();
+        $generatedDir = $baseDir . '/generated';
+
+        File::ensureDirectoryExists($workDir);
+        File::ensureDirectoryExists($generatedDir);
+
+        try {
+            $docxPaths = [];
+            $pdfPaths = [];
+
+            foreach ($rows as $index => $row) {
+                $number = str_pad((string) ($index + 1), 4, '0', STR_PAD_LEFT);
+                $docxPath = $workDir . '/hospital-' . $number . '.docx';
+                $this->fillAllocationTemplate($row, $docxPath);
+                $docxPaths[] = $docxPath;
+                $pdfPaths[] = $workDir . '/hospital-' . $number . '.pdf';
+            }
+
+            // แปลง Word ทั้งหมดด้วย LibreOffice หนึ่งรอบ
+            $this->convertDocxFilesToPdf($docxPaths, $workDir);
+
+            $combinedTempPath = $workDir . '/all-hospitals.pdf';
+
+            if (count($pdfPaths) === 1) {
+                File::copy($pdfPaths[0], $combinedTempPath);
+            } else {
+                // pdfunite มาจาก package poppler-utils ใน Docker Image
+                $arguments = ['pdfunite', ...$pdfPaths, $combinedTempPath];
+                $process = new Process($arguments);
+                $process->setTimeout(120);
+                $process->run();
+
+                if (!$process->isSuccessful() || !is_file($combinedTempPath)) {
+                    throw new RuntimeException(
+                        'ไม่สามารถรวมไฟล์ PDF ได้: ' . $process->getErrorOutput()
+                    );
+                }
+            }
+
+            $targetPdf = $generatedDir . '/allocation-all-' . Str::uuid() . '.pdf';
+            File::move($combinedTempPath, $targetPdf);
+
+            return $targetPdf;
+        } finally {
+            File::deleteDirectory($workDir);
+        }
+    }
+
+    /**
+     * สร้างหนังสือ 1 ฉบับ โดยมีตารางรายละเอียดโรงพยาบาลแนบท้าย
+     */
+    private function createPeriodPdf(object $file, array $rows): string
+    {
+        $baseDir = storage_path('app/documents');
+        $workDir = $baseDir . '/temp/' . Str::uuid();
+        $generatedDir = $baseDir . '/generated';
+
+        File::ensureDirectoryExists($workDir);
+        File::ensureDirectoryExists($generatedDir);
+
+        try {
+            $docxPath = $workDir . '/allocation-period.docx';
+            $this->fillPeriodTemplate($file, $rows, $docxPath);
+            $this->convertDocxFilesToPdf([$docxPath], $workDir);
+
+            $sourcePdf = $workDir . '/allocation-period.pdf';
+            $targetPdf = $generatedDir . '/allocation-period-' . Str::uuid() . '.pdf';
+
+            if (!is_file($sourcePdf)) {
+                throw new RuntimeException('ไม่พบไฟล์ PDF ที่แปลงจาก Word');
+            }
+
+            File::move($sourcePdf, $targetPdf);
+            return $targetPdf;
+        } finally {
+            File::deleteDirectory($workDir);
+        }
+    }
+
+    /** เติมข้อมูลหนังสือและ clone แถวตารางให้ครบทุกโรงพยาบาล */
+    private function fillPeriodTemplate(object $file, array $rows, string $docxPath): void
+    {
+        $templatePath = storage_path(
+            'app/documents/templates/network_allocation_period.docx'
+        );
+
+        if (!is_file($templatePath)) {
+            throw new RuntimeException(
+                'ไม่พบ Word Template: storage/app/documents/templates/network_allocation_period.docx'
+            );
+        }
+
+        $template = new TemplateProcessor($templatePath);
+        $budget = (string) $file->allocation_amount;
+
+        $grandRecords = array_sum(array_map(
+            static fn ($row) => (int) $row->total_records,
+            $rows
+        ));
+        $grandScore = (string) ($rows[0]->grand_score ?? '0');
+
+        // ข้อมูลในหน้าบันทึกข้อความ
+        $template->setValue('print_date', $this->thaiPrintDate());
+        $template->setValue('payment_period', (string) $file->payment_period);
+        $template->setValue('allocation_amount', $this->formatAmountForDocument($budget));
+        $template->setValue('allocation_amount_text', $this->thaiBahtText($budget));
+
+        // ตารางแนบท้าย: แถวต้นแบบใน Word ต้องมี ${hcode}
+        $template->cloneRow('hcode', count($rows));
+
+        foreach ($rows as $index => $row) {
+            $line = $index + 1;
+            $template->setValue("hcode#{$line}", (string) $row->hproc);
+            $template->setValue("hospital_name#{$line}", (string) $row->hospital_name);
+            $template->setValue("total_records#{$line}", number_format((int) $row->total_records));
+            $template->setValue("total_score#{$line}", $this->formatDecimalForDocument((string) $row->total_score));
+            $template->setValue("final_amount#{$line}", $this->formatAmountForDocument((string) $row->final_amount));
+        }
+
+        // แถวรวมท้ายตาราง
+        $template->setValue('grand_records', number_format($grandRecords));
+        $template->setValue('grand_score', $this->formatDecimalForDocument($grandScore));
+        $template->setValue('grand_amount', $this->formatAmountForDocument($budget));
+
+        $template->saveAs($docxPath);
+    }
+
+    /** จัดรูปแบบเลขทศนิยมโดยไม่แปลงผ่าน float */
+    private function formatDecimalForDocument(string $number): string
+    {
+        $negative = str_starts_with($number, '-');
+        if ($negative) {
+            $number = substr($number, 1);
+        }
+
+        [$integer, $fraction] = array_pad(explode('.', $number, 2), 2, '');
+        $integer = ltrim($integer, '0');
+        $integer = $integer === '' ? '0' : $integer;
+        $integer = preg_replace('/\\B(?=(\\d{3})+(?!\\d))/', ',', $integer);
+
+        return ($negative ? '-' : '') . $integer . ($fraction !== '' ? '.' . $fraction : '');
+    }
+
+    /** เติมข้อมูลลงใน Word Template */
+    private function fillAllocationTemplate(object $row, string $docxPath): void
+    {
+        $templatePath = storage_path(
+            'app/documents/templates/network_allocation_individual.docx'
+        );
+
+        if (!is_file($templatePath)) {
+            throw new RuntimeException(
+                'ไม่พบ Word Template: storage/app/documents/templates/network_allocation_individual.docx'
+            );
+        }
+
+        $template = new TemplateProcessor($templatePath);
+        $amount = (string) $row->final_amount;
+
+        $template->setValue('print_date', $this->thaiPrintDate());
+        $template->setValue('network_hospital', (string) $row->hospital_name);
+        $template->setValue('allocation_amount', $this->formatAmountForDocument($amount));
+        $template->setValue('allocation_amount_text', $this->thaiBahtText($amount));
+
+        $template->saveAs($docxPath);
+    }
+
+    /** แปลง DOCX เป็น PDF ด้วย LibreOffice */
+    private function convertDocxFilesToPdf(array $docxPaths, string $outputDir): void
+    {
+        $profileDir = $outputDir . '/lo-profile-' . Str::uuid();
+        File::ensureDirectoryExists($profileDir);
+
+        $arguments = [
+            'libreoffice',
+            '-env:UserInstallation=file://' . $profileDir,
+            '--headless',
+            '--convert-to',
+            'pdf',
+            '--outdir',
+            $outputDir,
+            ...$docxPaths,
+        ];
+
+        $process = new Process($arguments);
+        $process->setTimeout(180);
+        $process->run();
+
+        if (!$process->isSuccessful()) {
+            throw new RuntimeException(
+                'LibreOffice แปลง Word เป็น PDF ไม่สำเร็จ: ' . $process->getErrorOutput()
+            );
+        }
+
+        foreach ($docxPaths as $docxPath) {
+            $pdfPath = $outputDir . '/' . pathinfo($docxPath, PATHINFO_FILENAME) . '.pdf';
+            if (!is_file($pdfPath)) {
+                throw new RuntimeException(
+                    'LibreOffice ไม่พบไฟล์ PDF ที่สร้างจาก ' . basename($docxPath)
+                );
+            }
+        }
+    }
+
+    /** วันที่ภาษาไทย เช่น 23 พฤศจิกายน 2569 */
+    private function thaiPrintDate(): string
+    {
+        $date = now('Asia/Bangkok');
+        $months = [
+            1 => 'มกราคม', 2 => 'กุมภาพันธ์', 3 => 'มีนาคม',
+            4 => 'เมษายน', 5 => 'พฤษภาคม', 6 => 'มิถุนายน',
+            7 => 'กรกฎาคม', 8 => 'สิงหาคม', 9 => 'กันยายน',
+            10 => 'ตุลาคม', 11 => 'พฤศจิกายน', 12 => 'ธันวาคม',
+        ];
+
+        return $date->day . ' ' . $months[$date->month] . ' ' . ($date->year + 543);
+    }
+
+    /** จัดรูปแบบจำนวนเงินโดยไม่แปลงผ่าน float */
+    private function formatAmountForDocument(string $amount): string
+    {
+        [$integer, $fraction] = array_pad(explode('.', $amount, 2), 2, '');
+        $integer = ltrim($integer, '0');
+        $integer = $integer === '' ? '0' : $integer;
+        $integer = preg_replace('/\\B(?=(\\d{3})+(?!\\d))/', ',', $integer);
+        $fraction = str_pad(substr($fraction, 0, 2), 2, '0');
+
+        return $integer . '.' . $fraction;
+    }
+
+    /** แปลงจำนวนเงินเป็นข้อความภาษาไทย เช่น หนึ่งพันบาทห้าสิบสตางค์ */
+    private function thaiBahtText(string $amount): string
+    {
+        [$baht, $satang] = array_pad(explode('.', $amount, 2), 2, '0');
+        $baht = ltrim($baht, '0');
+        $baht = $baht === '' ? '0' : $baht;
+        $satang = str_pad(substr($satang, 0, 2), 2, '0');
+
+        $text = $this->thaiIntegerText($baht) . 'บาท';
+
+        if ((int) $satang === 0) {
+            return $text . 'ถ้วน';
+        }
+
+        return $text . $this->thaiIntegerText((string) (int) $satang) . 'สตางค์';
+    }
+
+    private function thaiIntegerText(string $number): string
+    {
+        $number = ltrim($number, '0');
+        if ($number === '') {
+            return 'ศูนย์';
+        }
+
+        $chunks = [];
+        while ($number !== '') {
+            $chunks[] = substr($number, -6);
+            $number = strlen($number) > 6 ? substr($number, 0, -6) : '';
+        }
+
+        $chunks = array_reverse($chunks);
+        $parts = [];
+        $chunkCount = count($chunks);
+
+        foreach ($chunks as $index => $chunk) {
+            if ((int) $chunk === 0) {
+                continue;
+            }
+
+            $millionCount = $chunkCount - $index - 1;
+            $parts[] = $this->thaiSixDigitGroup($chunk) . str_repeat('ล้าน', $millionCount);
+        }
+
+        return implode('', $parts);
+    }
+
+    private function thaiSixDigitGroup(string $number): string
+    {
+        $digits = str_split(str_pad($number, 6, '0', STR_PAD_LEFT));
+        $names = ['', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
+        $units = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน'];
+        $result = '';
+
+        foreach ($digits as $index => $char) {
+            $digit = (int) $char;
+            if ($digit === 0) {
+                continue;
+            }
+
+            $position = 5 - $index;
+
+            if ($position === 1) {
+                $result .= match ($digit) {
+                    1 => 'สิบ',
+                    2 => 'ยี่สิบ',
+                    default => $names[$digit] . 'สิบ',
+                };
+                continue;
+            }
+
+            if ($position === 0 && $digit === 1 && $result !== '') {
+                $result .= 'เอ็ด';
+                continue;
+            }
+
+            $result .= $names[$digit] . $units[$position];
+        }
+
+        return $result;
     }
 
     private function downloadSummary(object $file, array $rows)
@@ -526,5 +1144,35 @@ class StatementController extends Controller
             ->withQueryString();
 
         return view('statement.files', compact('files'));
+    }
+
+    public function destroyFile(int $fileId)
+    {
+        $deletedFileName = DB::transaction(function () use ($fileId) {
+        $file = DB::table('statement_files')
+            ->where('id', $fileId)
+            ->lockForUpdate()
+            ->first();
+
+        abort_if($file === null, 404, 'ไม่พบรายการสเตทเม้นที่ต้องการลบ');
+
+        // ลบรายละเอียดที่นำเข้าทั้งหมดของไฟล์นี้ก่อน
+        DB::table('statement_claim_details')
+            ->where('import_file_id', $fileId)
+            ->delete();
+
+        // ลบข้อมูลประวัติไฟล์นำเข้า ซึ่งรวม file_sha256 ด้วย
+        // หลังลบแล้วจึงสามารถอัปโหลดไฟล์เดิมซ้ำได้
+        DB::table('statement_files')
+            ->where('id', $fileId)
+            ->delete();
+
+        return $file->original_filename;
+        });
+
+        return redirect()->back()->with(
+            'success',
+            "ลบไฟล์ {$deletedFileName} และข้อมูลที่นำเข้าเรียบร้อยแล้ว สามารถอัปโหลดไฟล์เดิมใหม่ได้"
+        );
     }
 }
