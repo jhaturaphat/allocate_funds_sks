@@ -12,7 +12,15 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        //ระบุ IP ของ Proxy เพื่อให้ Laravel เชื่อถือ Header X-Forwarded-Proto: https จาก Reverse Proxy
+        // Uncomment $middleware->trustProxies(at: '*') หากใช้ reverse proxy และต้องการให้ Laravel เชื่อถือ Header X-Forwarded-Proto: https
+        // $middleware->trustProxies(at: '*');  
+        $middleware->alias([
+            'approved' => \App\Http\Middleware\EnsureAccountApproved::class,
+            'admin' => \App\Http\Middleware\EnsureAdmin::class,
+            'session.age' => \App\Http\Middleware\EnforceSessionLifetime::class,
+        ]);
+
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
