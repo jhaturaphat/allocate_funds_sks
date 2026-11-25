@@ -1,42 +1,113 @@
+
 @extends('layouts.app')
 
 @section('title', 'เข้าสู่ระบบ')
 
+@section('page-class', 'page--auth')
+
 @section('content')
-<section class="card" style="max-width: 460px; margin: 2rem auto;">
-    <h1 class="page-title">เข้าสู่ระบบ</h1>
+<div class="auth-wrapper">
 
-    @if (session('status'))
-        <p class="notice notice--info" role="status">{{ session('status') }}</p>
-    @endif
+    <section class="auth-card">
 
-    @if ($errors->any())
-        <div class="notice notice--error" role="alert">
-            @foreach ($errors->all() as $error)
-                <p>{{ $error }}</p>
-            @endforeach
-        </div>
-    @endif
+        {{-- Brand --}}
+        <div class="auth-brand">
+            <div class="auth-brand__logo">SKS</div>
 
-    <form method="POST" action="{{ route('login.store') }}">
-        @csrf
-        <div class="field">
-            <label for="username">Username</label>
-            <input id="username" name="username" type="text" value="{{ old('username') }}"
-                   autocomplete="username" required autofocus>
+            <div class="auth-brand__text">
+                <strong>SKS Management</strong>
+                <span>Social Security Management</span>
+            </div>
         </div>
 
-        <div class="field">
-            <label for="password">Password</label>
-            <input id="password" name="password" type="password"
-                   autocomplete="current-password" required>
+        <div class="auth-heading">
+            <h1>ยินดีต้อนรับ</h1>
+            <p>เข้าสู่ระบบบริหารจัดการข้อมูลประกันสังคม</p>
         </div>
 
-        <button type="submit" class="btn btn--primary">เข้าสู่ระบบ</button>
-    </form>
+        {{-- Status --}}
+        @if (session('status'))
+            <div class="notice notice--info" role="status">
+                {{ session('status') }}
+            </div>
+        @endif
 
-    <p class="field__hint" style="margin-top: 1rem;">
-        ยังไม่มีบัญชี? <a href="{{ route('register') }}">สมัครสมาชิก</a>
-    </p>
-</section>
+        {{-- Errors --}}
+        @if ($errors->any())
+            <div class="notice notice--error" role="alert">
+                @foreach ($errors->all() as $error)
+                    <p>{{ $error }}</p>
+                @endforeach
+            </div>
+        @endif
+
+        {{-- Login Form --}}
+        <form method="POST" action="{{ route('login.store') }}">
+            @csrf
+
+            <div class="field auth-field">
+                <label for="username" class="field__label">
+                    Username
+                </label>
+
+                <div class="auth-input-wrap">
+                    <span class="auth-input-icon">
+                        <i data-lucide="user"></i>
+                    </span>
+
+                    <input
+                        id="username"
+                        name="username"
+                        type="text"
+                        class="field__control auth-input"
+                        value="{{ old('username') }}"
+                        placeholder="กรอก Username ของคุณ"
+                        autocomplete="username"
+                        required
+                        autofocus
+                    >
+                </div>
+            </div>
+
+            <div class="field auth-field">
+                <label for="password" class="field__label">
+                    Password
+                </label>
+
+                <div class="auth-input-wrap">
+                    <span class="auth-input-icon">
+                        <i data-lucide="lock"></i>
+                    </span>
+
+                    <input
+                        id="password"
+                        name="password"
+                        type="password"
+                        class="field__control auth-input"
+                        placeholder="กรอกรหัสผ่าน"
+                        autocomplete="current-password"
+                        required
+                    >
+                </div>
+            </div>
+            <br>
+            <button type="submit" class="btn btn--primary auth-submit">
+                เข้าสู่ระบบ
+                <i data-lucide="arrow-right"></i>
+            </button>
+
+        </form>
+
+        <div class="auth-register">
+            <span>ยังไม่มีบัญชีใช้งาน?</span>
+            <a href="{{ route('register') }}">สมัครสมาชิก</a>
+        </div>
+
+        <div class="auth-footer">
+            ระบบสำหรับบุคลากรที่ได้รับอนุมัติให้เข้าใช้งาน
+        </div>
+
+    </section>
+
+</div>
 @endsection
