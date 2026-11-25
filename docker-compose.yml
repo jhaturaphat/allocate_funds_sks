@@ -9,7 +9,7 @@ services:
       MYSQL_USER: "${MYSQL_USER:?Set MYSQL_USER}"
       MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}"
     ports:
-      - "127.0.0.1:3307:3306"
+      - "0.0.0.0:3307:3306"
     volumes:
       - ./mysql-data:/var/lib/mysql
     command:
