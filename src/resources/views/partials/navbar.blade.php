@@ -11,7 +11,7 @@
             <span class="site-navbar__logo">SKS</span>
             <span class="site-navbar__brand-text">
                 <strong>SKS Management</strong>
-                <small>Social Security Management</small>
+                <small>จัดสรรงบประมาณประกันสังคม</small>
             </span>
         </a>
 
