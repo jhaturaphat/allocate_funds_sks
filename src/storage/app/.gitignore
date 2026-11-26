@@ -1,4 +1,5 @@
-*
+
+!documents/templates/**
 !private/
 !public/
 !.gitignore

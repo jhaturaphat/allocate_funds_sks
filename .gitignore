@@ -4,6 +4,8 @@
 /src/node_modules
 /src/public/build
 /src/public/hot
+!/src/storage/app/documents/
+!/src/storage/app/documents/templates/
 !/src/storage/app/documents/templates/*
 /src/storage/*.key
 /src/vendor
