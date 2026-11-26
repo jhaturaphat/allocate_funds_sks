@@ -1134,7 +1134,8 @@ class StatementController extends Controller
                 'payment_period',
                 'imported_rows',
                 'allocation_amount',
-                'imported_at'
+                'imported_at',
+                'submission_status'
             )
             ->orderByDesc('payment_year')
             ->orderByRaw('payment_period IS NULL ASC')
@@ -1146,6 +1147,116 @@ class StatementController extends Controller
         return view('statement.files', compact('files'));
     }
 
+    /**
+     * ผู้ใช้งานที่ผ่านการอนุมัติยืนยันว่าได้นำส่งเงินแล้ว
+     * เมื่อยืนยัน สถานะจะถูกล็อกไม่ให้ลบจนกว่า Admin จะคืนสถานะ
+     */
+    public function confirmSubmission(Request $request, int $fileId)
+    {
+        $result = DB::transaction(function () use ($request, $fileId) {
+            $file = DB::table('statement_files')
+                ->where('id', $fileId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($file === null) {
+                return ['success' => false, 'message' => 'ไม่พบรายการสเตทเม้นที่ต้องการยืนยัน'];
+            }
+
+            if ($file->status !== 'completed' || $file->allocation_amount === null) {
+                return [
+                    'success' => false,
+                    'message' => 'กรุณานำเข้าไฟล์ให้สำเร็จและระบุยอดจัดสรรก่อนยืนยันการนำส่งเงิน',
+                ];
+            }
+
+            if ($file->submission_status !== 'pending') {
+                return ['success' => false, 'message' => 'รายการนี้ไม่ได้อยู่ในสถานะรอนำส่งเงิน'];
+            }
+
+            $actedAt = now();
+            $actor = $request->user();
+
+            DB::table('statement_files')
+                ->where('id', $fileId)
+                ->update([
+                    'submission_status' => 'submitted',
+                    'submitted_at' => $actedAt,
+                    'submitted_by' => $actor->id,
+                ]);
+
+            // เก็บประวัติแยกต่างหาก และไม่ผูก Foreign Key เพื่อรักษาประวัติ
+            // แม้ภายหลัง Admin จะคืนสถานะแล้วอนุญาตให้ลบไฟล์ต้นทาง
+            DB::table('statement_file_submission_histories')->insert([
+                'statement_file_id' => $fileId,
+                'original_filename' => $file->original_filename,
+                'action' => 'submitted',
+                'from_status' => 'pending',
+                'to_status' => 'submitted',
+                'actor_id' => $actor->id,
+                'actor_username' => $actor->username ?? null,
+                'acted_at' => $actedAt,
+            ]);
+
+            return ['success' => true, 'message' => 'ยืนยันการนำส่งเงินเรียบร้อยแล้ว ระบบล็อกการลบไฟล์นี้แล้ว'];
+        });
+
+        return redirect()->back()->with(
+            $result['success'] ? 'success' : 'error',
+            $result['message']
+        );
+    }
+
+    /**
+     * Admin เท่านั้นที่สามารถคืนสถานะจากเสร็จสิ้นเป็นรอนำส่งเงินได้
+     */
+    public function reopenSubmission(Request $request, int $fileId)
+    {
+        $result = DB::transaction(function () use ($request, $fileId) {
+            $file = DB::table('statement_files')
+                ->where('id', $fileId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($file === null) {
+                return ['success' => false, 'message' => 'ไม่พบรายการสเตทเม้นที่ต้องการคืนสถานะ'];
+            }
+
+            if ($file->submission_status !== 'submitted') {
+                return ['success' => false, 'message' => 'รายการนี้ไม่ได้อยู่ในสถานะเสร็จสิ้น'];
+            }
+
+            $actedAt = now();
+            $actor = $request->user();
+
+            DB::table('statement_files')
+                ->where('id', $fileId)
+                ->update([
+                    'submission_status' => 'pending',
+                    'submitted_at' => null,
+                    'submitted_by' => null,
+                ]);
+
+            DB::table('statement_file_submission_histories')->insert([
+                'statement_file_id' => $fileId,
+                'original_filename' => $file->original_filename,
+                'action' => 'reopened',
+                'from_status' => 'submitted',
+                'to_status' => 'pending',
+                'actor_id' => $actor->id,
+                'actor_username' => $actor->username ?? null,
+                'acted_at' => $actedAt,
+            ]);
+
+            return ['success' => true, 'message' => 'Admin คืนสถานะรายการเรียบร้อยแล้ว ขณะนี้สามารถลบไฟล์ได้ตามสิทธิ์เดิม'];
+        });
+
+        return redirect()->back()->with(
+            $result['success'] ? 'success' : 'error',
+            $result['message']
+        );
+    }
+
     public function destroyFile(int $fileId)
     {
         $deletedFileName = DB::transaction(function () use ($fileId) {
@@ -1155,6 +1266,13 @@ class StatementController extends Controller
             ->first();
 
         abort_if($file === null, 404, 'ไม่พบรายการสเตทเม้นที่ต้องการลบ');
+
+        // ป้องกันการลบที่ฝั่ง Server แม้ผู้ใช้เรียก DELETE URL โดยตรง
+        abort_if(
+            $file->submission_status === 'submitted',
+            403,
+            'ไม่สามารถลบไฟล์นี้ได้ เนื่องจากยืนยันการนำส่งเงินแล้ว กรุณาให้ Admin คืนสถานะก่อน'
+        );
 
         // ลบรายละเอียดที่นำเข้าทั้งหมดของไฟล์นี้ก่อน
         DB::table('statement_claim_details')

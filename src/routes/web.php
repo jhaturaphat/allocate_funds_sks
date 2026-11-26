@@ -49,6 +49,9 @@ Route::middleware(['auth', 'approved', 'session.age'])->group(function () {
     Route::delete('/statement/files/{fileId}', [StatementController::class, 'destroyFile'])
         ->whereNumber('fileId')
         ->name('statement.files.destroy');
+    Route::post('/statement/files/{fileId}/confirm-submission', [StatementController::class, 'confirmSubmission'])
+        ->whereNumber('fileId')
+        ->name('statement.files.confirm-submission');
 
     Route::get('/statement/{fileId}/amount/edit', [StatementController::class, 'editAmount'])
         ->whereNumber('fileId')
@@ -94,5 +97,8 @@ Route::middleware(['auth', 'approved', 'session.age'])->group(function () {
         Route::post('/users/{user}/approve', [UserApprovalController::class, 'approve'])
             ->whereNumber('user')
             ->name('users.approve');
+        Route::post('/statement/files/{fileId}/reopen-submission', [StatementController::class, 'reopenSubmission'])
+            ->whereNumber('fileId')
+            ->name('statement.files.reopen-submission');
     });
 });

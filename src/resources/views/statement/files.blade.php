@@ -35,6 +35,7 @@
                             <th scope="col" class="number">จำนวนรายการ</th>
                             <th scope="col" class="number">ยอดจัดสรร (บาท)</th>
                             <th scope="col">ประมวลผล</th>
+                            <th scope="col">สถานะนำส่งเงิน</th>
                             <th scope="col">จัดการ</th>
                         </tr>
                     </thead>
@@ -65,26 +66,53 @@
                                     @endif
                                 </td>
                                 <td>
-                                    <form method="POST"
-                                          action="{{ route('statement.files.destroy', ['fileId' => $file->id]) }}"
-                                          onsubmit="return confirm('ยืนยันลบไฟล์นี้ใช่หรือไม่? ข้อมูลรายละเอียดที่นำเข้าและผลการประมวลผลของไฟล์นี้จะถูกลบถาวร และสามารถนำไฟล์เดิมกลับมาอัปโหลดใหม่ได้');">
-                                        @csrf
-                                        @method('DELETE')
-                                        <button type="submit" class="btn btn--danger"
-                                                aria-label="ลบไฟล์ {{ $file->original_filename }}">
-                                            ลบ
-                                        </button>
-                                    </form>
+                                    @if ($file->submission_status === 'submitted')
+                                        <span class="field__hint">เสร็จสิ้น</span>
+
+                                        @if (auth()->user()->is_admin)
+                                            <form method="POST"
+                                                  action="{{ route('admin.statement.files.reopen-submission', ['fileId' => $file->id]) }}"
+                                                  onsubmit="return confirm('ต้องการคืนสถานะไฟล์นี้เป็นรอนำส่งเงินใช่หรือไม่?');">
+                                                @csrf
+                                                <button type="submit" class="btn btn--primary">
+                                                    คืนสถานะ
+                                                </button>
+                                            </form>
+                                        @endif
+                                    @elseif ($file->allocation_amount !== null)
+                                        <form method="POST"
+                                              action="{{ route('statement.files.confirm-submission', ['fileId' => $file->id]) }}"
+                                              onsubmit="return confirm('ยืนยันว่าได้นำส่งเงินของงวดนี้แล้วใช่หรือไม่? เมื่อยืนยันแล้วจะไม่สามารถลบไฟล์นี้ได้จนกว่า Admin จะคืนสถานะ');">
+                                            @csrf
+                                            <button type="submit" class="btn btn--primary"
+                                                    aria-label="ยืนยันนำส่งเงินไฟล์ {{ $file->original_filename }}">
+                                                ยืนยันนำส่งเงินแล้ว
+                                            </button>
+                                        </form>
+                                    @else
+                                        <span class="field__hint">รอระบุยอดเงิน</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    @if ($file->submission_status === 'submitted')
+                                        <span class="field__hint">ล็อกการลบ</span>
+                                    @else
+                                        <form method="POST"
+                                              action="{{ route('statement.files.destroy', ['fileId' => $file->id]) }}"
+                                              onsubmit="return confirm('ยืนยันลบไฟล์นี้ใช่หรือไม่? ข้อมูลรายละเอียดที่นำเข้าและผลการประมวลผลของไฟล์นี้จะถูกลบถาวร และสามารถนำไฟล์เดิมกลับมาอัปโหลดใหม่ได้');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit" class="btn btn--danger"
+                                                    aria-label="ลบไฟล์ {{ $file->original_filename }}">
+                                                ลบ
+                                            </button>
+                                        </form>
+                                    @endif
                                 </td>
                             </tr>
                         @endforeach
                     </tbody>
-                </table>
-                @if ($files->hasPages())
-                    <nav aria-label="เปลี่ยนหน้ารายการสเตทเม้น">
-                        {{ $files->links() }}
-                    </nav>
-                @endif
+                </table>                
             </div>
 
             <p class="field__hint">
